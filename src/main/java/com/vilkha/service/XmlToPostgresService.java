@@ -12,11 +12,14 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.regex.Pattern;
 
 public final class XmlToPostgresService {
 
     private final XmlCatalogParser parser;
     private final PostgresDao dao;
+
+    private static final Pattern IDENT = Pattern.compile("[a-zA-Z_][a-zA-Z0-9_]*");
 
     public XmlToPostgresService(XmlCatalogParser parser, PostgresDao dao) {
         this.parser = Objects.requireNonNull(parser);
@@ -28,21 +31,29 @@ public final class XmlToPostgresService {
     }
 
     public String getTableDDL(String tableName) throws Exception {
+        requireAllowedTable(tableName);
+
         String idCol = idColumn(tableName);
         LinkedHashMap<String, SqlType> schema = parser.inferSchema(tableName, idCol);
 
+        for (String col : schema.keySet()) qIdent(col);
+        if (idCol != null) qIdent(idCol);
+
         StringBuilder sb = new StringBuilder();
-        sb.append("CREATE TABLE IF NOT EXISTS \"").append(tableName).append("\" (\n");
+        sb.append("CREATE TABLE IF NOT EXISTS ").append(qIdent(tableName)).append(" (\n");
 
         int i = 0;
         for (Map.Entry<String, SqlType> e : schema.entrySet()) {
             if (i++ > 0) sb.append(",\n");
-            sb.append("  \"").append(e.getKey()).append("\" ").append(e.getValue().ddl());
+            sb.append("  ").append(qIdent(e.getKey())).append(" ").append(e.getValue().ddl());
         }
 
         if (idCol != null && schema.containsKey(idCol)) {
-            sb.append(",\n  CONSTRAINT \"pk_").append(tableName)
-                    .append("\" PRIMARY KEY (\"").append(idCol).append("\")");
+            sb.append(",\n  CONSTRAINT ")
+                    .append(qIdent("pk_" + tableName))
+                    .append(" PRIMARY KEY (")
+                    .append(qIdent(idCol))
+                    .append(")");
         }
 
         sb.append("\n);\n");
@@ -56,26 +67,34 @@ public final class XmlToPostgresService {
     }
 
     public void update(String tableName) throws Exception {
-        String idCol = idColumn(tableName);
+        requireAllowedTable(tableName);
 
+        String idCol = idColumn(tableName);
         LinkedHashMap<String, SqlType> xmlSchema = parser.inferSchema(tableName, idCol);
+
+        for (String col : xmlSchema.keySet()) qIdent(col);
+        if (idCol != null) qIdent(idCol);
 
         dao.execute(getTableDDL(tableName));
 
         ensureStructureNotChanged(tableName, xmlSchema);
 
         List<Map<String, Object>> rows = parser.readRows(tableName);
-        List<String> columns = new ArrayList<>(xmlSchema.keySet());
         dao.upsertBatch(tableName, idCol, xmlSchema, rows);
     }
 
     public ArrayList<String> getColumnNames(String tableName) throws Exception {
+        requireAllowedTable(tableName);
+
         String idCol = idColumn(tableName);
         LinkedHashMap<String, SqlType> schema = parser.inferSchema(tableName, idCol);
         return new ArrayList<>(schema.keySet());
     }
 
     public boolean isColumnId(String tableName, String columnName) throws Exception {
+        requireAllowedTable(tableName);
+        qIdent(columnName);
+
         List<Map<String, Object>> rows = parser.readRows(tableName);
         Set<Object> seen = new HashSet<>();
         for (Map<String, Object> row : rows) {
@@ -87,6 +106,8 @@ public final class XmlToPostgresService {
     }
 
     public String getDDLChange(String tableName) throws Exception {
+        requireAllowedTable(tableName);
+
         String idCol = idColumn(tableName);
         LinkedHashMap<String, SqlType> xmlSchema = parser.inferSchema(tableName, idCol);
         Set<String> dbCols = dao.fetchColumns(tableName);
@@ -98,12 +119,14 @@ public final class XmlToPostgresService {
 
         if (missing.isEmpty()) return "-- no changes\n";
 
+        for (String col : missing) qIdent(col);
+
         StringBuilder sb = new StringBuilder();
         for (String col : missing) {
             SqlType t = xmlSchema.get(col);
-            sb.append("ALTER TABLE \"").append(tableName)
-                    .append("\" ADD COLUMN \"").append(col)
-                    .append("\" ").append(t.ddl()).append(";\n");
+            sb.append("ALTER TABLE ").append(qIdent(tableName))
+                    .append(" ADD COLUMN ").append(qIdent(col))
+                    .append(" ").append(t.ddl()).append(";\n");
         }
         return sb.toString();
     }
@@ -128,9 +151,25 @@ public final class XmlToPostgresService {
         }
     }
 
+    private void requireAllowedTable(String tableName) {
+        if (tableName == null || tableName.isBlank()) {
+            throw new IllegalArgumentException("tableName is blank");
+        }
+        List<String> allowed = parser.getTableNames();
+        if (!allowed.contains(tableName)) {
+            throw new IllegalArgumentException("Unknown table: " + tableName + ". Allowed: " + allowed);
+        }
+    }
+
+    private static String qIdent(String ident) {
+        if (ident == null || ident.isBlank() || !IDENT.matcher(ident).matches()) {
+            throw new IllegalArgumentException("Invalid SQL identifier: " + ident);
+        }
+        return "\"" + ident + "\"";
+    }
+
     private String idColumn(String tableName) {
         if ("offers".equals(tableName)) return "vendorCode";
         return "id";
     }
 }
-

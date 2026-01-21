@@ -8,6 +8,7 @@ import com.vilkha.database.PostgresDao;
 import com.vilkha.service.XmlToPostgresService;
 import com.vilkha.xml.XmlCatalogParser;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.Scanner;
 
@@ -72,7 +73,8 @@ public final class Main {
                                 System.out.println("Usage: ddl <table>");
                                 break;
                             }
-                            System.out.println(service.getTableDDL(p[1]));
+                            String table = requireTable(service, p[1]);
+                            System.out.println(service.getTableDDL(table));
                         }
 
                         case "columns" -> {
@@ -80,13 +82,15 @@ public final class Main {
                                 System.out.println("Usage: columns <table>");
                                 break;
                             }
-                            System.out.println(service.getColumnNames(p[1]));
+                            String table = requireTable(service, p[1]);
+                            System.out.println(service.getColumnNames(table));
                         }
 
                         case "update" -> {
                             if (p.length >= 2) {
-                                service.update(p[1]);
-                                System.out.println("OK: updated " + p[1]);
+                                String table = requireTable(service, p[1]);
+                                service.update(table);
+                                System.out.println("OK: updated " + table);
                             } else {
                                 service.update();
                                 System.out.println("OK: updated all");
@@ -98,7 +102,9 @@ public final class Main {
                                 System.out.println("Usage: isId <table> <column>");
                                 break;
                             }
-                            System.out.println(service.isColumnId(p[1], p[2]));
+                            String table = requireTable(service, p[1]);
+                            String col = requireIdent(p[2]);
+                            System.out.println(service.isColumnId(table, col));
                         }
 
                         case "ddlchange" -> {
@@ -106,7 +112,8 @@ public final class Main {
                                 System.out.println("Usage: ddlChange <table>");
                                 break;
                             }
-                            System.out.println(service.getDDLChange(p[1]));
+                            String table = requireTable(service, p[1]);
+                            System.out.println(service.getDDLChange(table));
                         }
 
                         default -> System.out.println("Unknown command: " + cmd + ". Type: help");
@@ -121,5 +128,22 @@ public final class Main {
 
     private static void require(String value, String message) {
         if (value == null || value.isBlank()) throw new IllegalArgumentException(message);
+    }
+
+    private static String requireTable(XmlToPostgresService service, String table) {
+        if (table == null || table.isBlank()) throw new IllegalArgumentException("table is required");
+        List<String> allowed = service.getTableNames();
+        if (!allowed.contains(table)) {
+            throw new IllegalArgumentException("Unknown table: " + table + ". Allowed: " + allowed);
+        }
+        return table;
+    }
+
+    private static String requireIdent(String name) {
+        if (name == null || name.isBlank()) throw new IllegalArgumentException("identifier is required");
+        if (!name.matches("[a-zA-Z_][a-zA-Z0-9_]*")) {
+            throw new IllegalArgumentException("Invalid identifier: " + name);
+        }
+        return name;
     }
 }

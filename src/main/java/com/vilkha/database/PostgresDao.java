@@ -58,20 +58,18 @@ public class PostgresDao {
 
         requireValidIdent(tableName, "tableName");
         requireValidIdent(keyColumn, "keyColumn");
-        for (String col : schema.keySet()) {
-            requireValidIdent(col, "column");
-        }
+        for (String col : schema.keySet()) requireValidIdent(col, "column");
 
         List<String> columns = new ArrayList<>(schema.keySet());
         if (!columns.contains(keyColumn)) {
             throw new IllegalArgumentException("columns must contain keyColumn: " + keyColumn);
         }
 
-        String qTable = quoteIdent(tableName);
-        String qKey   = quoteIdent(keyColumn);
+        String qTable = qIdent(tableName);
+        String qKey = qIdent(keyColumn);
 
-        String insertColsSql = join(columns, PostgresDao::quoteIdent, ", ");
-        String placeholders  = join(columns, c -> "?", ", ");
+        String insertColsSql = join(columns, PostgresDao::qIdent, ", ");
+        String placeholders = join(columns, c -> "?", ", ");
 
         List<String> updCols = new ArrayList<>();
         for (String c : columns) {
@@ -81,10 +79,7 @@ public class PostgresDao {
             throw new IllegalStateException("No updatable columns for table " + tableName);
         }
 
-        String updateSql = join(updCols,
-                c -> quoteIdent(c) + " = EXCLUDED." + quoteIdent(c),
-                ", "
-        );
+        String updateSql = join(updCols, c -> qIdent(c) + " = EXCLUDED." + qIdent(c), ", ");
 
         String upsertSql =
                 "INSERT INTO " + qTable + " (" + insertColsSql + ")\n" +
@@ -93,25 +88,31 @@ public class PostgresDao {
 
         try (Connection c = connectionFactory.get(); PreparedStatement ps = c.prepareStatement(upsertSql)) {
             c.setAutoCommit(false);
+            try {
+                for (Map<String, Object> row : rows) {
+                    Object keyVal = row.get(keyColumn);
+                    if (keyVal == null || String.valueOf(keyVal).trim().isEmpty()) {
+                        continue;
+                    }
 
-            for (Map<String, Object> row : rows) {
-                Object keyVal = row.get(keyColumn);
-                if (keyVal == null || String.valueOf(keyVal).trim().isEmpty()) {
-                    continue;
+                    for (int i = 0; i < columns.size(); i++) {
+                        String col = columns.get(i);
+                        SqlType type = schema.get(col);
+                        Object raw = row.get(col);
+                        bind(ps, i + 1, type, raw);
+                    }
+
+                    ps.addBatch();
                 }
 
-                for (int i = 0; i < columns.size(); i++) {
-                    String col = columns.get(i);
-                    SqlType type = schema.get(col);
-                    Object raw = row.get(col);
-                    bind(ps, i + 1, type, raw);
-                }
-
-                ps.addBatch();
+                ps.executeBatch();
+                c.commit();
+            } catch (Exception e) {
+                c.rollback();
+                throw e;
+            } finally {
+                c.setAutoCommit(true);
             }
-
-            ps.executeBatch();
-            c.commit();
         }
     }
 
@@ -124,7 +125,8 @@ public class PostgresDao {
         }
     }
 
-    private static String quoteIdent(String ident) {
+    private static String qIdent(String ident) {
+        requireValidIdent(ident, "identifier");
         return "\"" + ident + "\"";
     }
 
