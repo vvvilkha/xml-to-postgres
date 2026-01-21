@@ -1,0 +1,26 @@
+plugins {
+    id 'java'
+    id 'groovy'
+    id 'application'
+}
+
+group = 'com.vilkha'
+version = '1.0-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.apache.groovy:groovy:4.0.22'
+    implementation 'org.apache.groovy:groovy-xml:4.0.22'
+    implementation 'org.postgresql:postgresql:42.7.7'
+}
+
+application {
+    mainClass.set("com.vilkha.Main")
+}
+
+test {
+    useJUnitPlatform()
+}
