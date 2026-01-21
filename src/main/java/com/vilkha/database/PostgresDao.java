@@ -13,8 +13,11 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 
 public class PostgresDao {
+
+    private static final Pattern IDENT = Pattern.compile("[a-zA-Z_][a-zA-Z0-9_]*");
 
     private final ConnectionFactory connectionFactory;
 
@@ -53,13 +56,21 @@ public class PostgresDao {
             List<Map<String, Object>> rows
     ) throws Exception {
 
-        List<String> columns = new ArrayList<>(schema.keySet());
+        requireValidIdent(tableName, "tableName");
+        requireValidIdent(keyColumn, "keyColumn");
+        for (String col : schema.keySet()) {
+            requireValidIdent(col, "column");
+        }
 
+        List<String> columns = new ArrayList<>(schema.keySet());
         if (!columns.contains(keyColumn)) {
             throw new IllegalArgumentException("columns must contain keyColumn: " + keyColumn);
         }
 
-        String insertColsSql = join(columns, c -> "\"" + c + "\"", ", ");
+        String qTable = quoteIdent(tableName);
+        String qKey   = quoteIdent(keyColumn);
+
+        String insertColsSql = join(columns, PostgresDao::quoteIdent, ", ");
         String placeholders  = join(columns, c -> "?", ", ");
 
         List<String> updCols = new ArrayList<>();
@@ -70,12 +81,15 @@ public class PostgresDao {
             throw new IllegalStateException("No updatable columns for table " + tableName);
         }
 
-        String updateSql = join(updCols, c -> "\"" + c + "\" = EXCLUDED.\"" + c + "\"", ", ");
+        String updateSql = join(updCols,
+                c -> quoteIdent(c) + " = EXCLUDED." + quoteIdent(c),
+                ", "
+        );
 
         String upsertSql =
-                "INSERT INTO \"" + tableName + "\" (" + insertColsSql + ")\n" +
+                "INSERT INTO " + qTable + " (" + insertColsSql + ")\n" +
                         "VALUES (" + placeholders + ")\n" +
-                        "ON CONFLICT (\"" + keyColumn + "\") DO UPDATE SET " + updateSql;
+                        "ON CONFLICT (" + qKey + ") DO UPDATE SET " + updateSql;
 
         try (Connection c = connectionFactory.get(); PreparedStatement ps = c.prepareStatement(upsertSql)) {
             c.setAutoCommit(false);
@@ -83,14 +97,13 @@ public class PostgresDao {
             for (Map<String, Object> row : rows) {
                 Object keyVal = row.get(keyColumn);
                 if (keyVal == null || String.valueOf(keyVal).trim().isEmpty()) {
-                continue;
+                    continue;
                 }
 
                 for (int i = 0; i < columns.size(); i++) {
                     String col = columns.get(i);
                     SqlType type = schema.get(col);
                     Object raw = row.get(col);
-
                     bind(ps, i + 1, type, raw);
                 }
 
@@ -100,6 +113,19 @@ public class PostgresDao {
             ps.executeBatch();
             c.commit();
         }
+    }
+
+    private static void requireValidIdent(String ident, String what) {
+        if (ident == null || ident.isBlank()) {
+            throw new IllegalArgumentException(what + " is blank");
+        }
+        if (!IDENT.matcher(ident).matches()) {
+            throw new IllegalArgumentException("Invalid SQL identifier for " + what + ": " + ident);
+        }
+    }
+
+    private static String quoteIdent(String ident) {
+        return "\"" + ident + "\"";
     }
 
     private static void bind(PreparedStatement ps, int idx, SqlType type, Object raw) throws SQLException {
@@ -120,7 +146,6 @@ public class PostgresDao {
             case DECIMAL -> ps.setBigDecimal(idx, new java.math.BigDecimal(s.replace(',', '.')));
             case BOOLEAN -> ps.setBoolean(idx, parseBool(s));
             case TEXT, VARCHAR -> ps.setString(idx, s);
-            default -> ps.setObject(idx, s); // безопасный запасной вариант
         }
     }
 

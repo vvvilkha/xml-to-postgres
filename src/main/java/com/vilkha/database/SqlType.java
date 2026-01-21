@@ -11,9 +11,11 @@ public enum SqlType {
     VARCHAR("varchar", Types.VARCHAR);
 
     private final String ddl;
+    private final int jdbcType;
 
-    SqlType(String ddl, int type) {
+    SqlType(String ddl, int jdbcType) {
         this.ddl = ddl;
+        this.jdbcType = jdbcType;
     }
 
     public String ddl() {
@@ -21,12 +23,7 @@ public enum SqlType {
     }
 
     public int jdbcType() {
-        return switch (this) {
-            case BIGINT -> Types.BIGINT;
-            case INTEGER -> Types.INTEGER;
-            case DECIMAL -> Types.NUMERIC;
-            case BOOLEAN -> Types.BOOLEAN;
-            case TEXT, VARCHAR -> Types.VARCHAR;
-        };
+        return jdbcType;
     }
 }
+

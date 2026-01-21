@@ -10,7 +10,14 @@ import java.io.InputStream;
 import java.net.URI;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.util.*;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.regex.Pattern;
 
 public class XmlCatalogParser {
@@ -180,7 +187,7 @@ public class XmlCatalogParser {
         }
 
         if (allInt) return SqlType.BIGINT;
-        if (allNum) return SqlType.BIGINT;
+        if (allNum) return SqlType.DECIMAL;
         return SqlType.TEXT;
     }
 
